@@ -1,0 +1,84 @@
+#!/usr/bin/python
+
+from lxml import html
+import requests
+import base64
+import httplib2
+import sys
+
+from email.mime.text import MIMEText
+
+from apiclient.discovery import build
+from oauth2client.client import flow_from_clientsecrets
+from oauth2client.file import Storage
+from oauth2client.tools import run_flow
+
+def scrapesite ( url, xpath):
+  page = requests.get(url)
+  tree = html.fromstring(page.content)
+  textlist = tree.xpath(xpath)
+  textlist[0] = textlist[0].replace('\n', "")
+  textlist[0] = textlist[0].replace(':', ".")
+  return textlist
+
+dienet = scrapesite('http://www.die.net/moon/', '//*[@id="content"]/table/tr[1]/td/text()')
+moonphase = scrapesite('http://lunaf.com/lunar-calendar/', '//p[@itemprop="description"]/text()')
+
+if len(sys.argv) > 1:
+  f = open(sys.argv[1], 'r')
+  bodyfile = f.read()
+  f.close()
+else:
+  bodyfile = "you forgot something..."
+
+if len(sys.argv) == 3:  
+  subjectlist = ['subjizzle', sys.argv[2] ]
+else:
+  subjectlist = ['subjizzle']
+  
+subjectaggregate = ' '.join(subjectlist)
+bodylist = [moonphase[0], dienet[0], bodyfile]
+bodyaggregate = '\n'.join(bodylist)
+
+#print "Subject: %s" % subjectaggregate
+#print bodyaggregate
+
+# Path to the client_secret.json file downloaded from the Developer Console
+CLIENT_SECRET_FILE = 'client_secret.json'
+
+# Check https://developers.google.com/gmail/api/auth/scopes for all available scopes
+OAUTH_SCOPE = 'https://www.googleapis.com/auth/gmail.compose'
+
+# Location of the credentials storage file
+STORAGE = Storage('gmail.storage')
+
+# Start the OAuth flow to retrieve credentials
+flow = flow_from_clientsecrets(CLIENT_SECRET_FILE, scope=OAUTH_SCOPE)
+http = httplib2.Http()
+
+# Try to retrieve credentials from storage or run_flow() the flow to generate them
+credentials = STORAGE.get()
+if credentials is None or credentials.invalid:
+  credentials = run_flow(flow, STORAGE, http=http)
+
+# Authorize the httplib2.Http object with our credentials
+http = credentials.authorize(http)
+
+# Build the Gmail service from discovery
+gmail_service = build('gmail', 'v1', http=http)
+
+# create a message to send
+message = MIMEText(bodyaggregate)
+message['to'] = "mizzle@gmail.com"
+message['from'] = "mizzle@gmail.com"
+message['subject'] = subjectaggregate
+body = {'raw': base64.b64encode(message.as_string())}
+
+# send it
+try:
+  message = (gmail_service.users().messages().send(userId="me", body=body).execute())
+  print('Message Id: %s' % message['id'])
+  print(message)
+except Exception as error:
+  print('An error occurred: %s' % error)
+
